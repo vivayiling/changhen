@@ -1,8 +1,9 @@
 
-import { ItemRarity, EquipmentSlot, GameSet } from './types';
+import { ItemRarity, EquipmentSlot, GameSet, PetBreed } from './types';
 
 export const LEVEL_CAP = 100;
 export const MAX_INVENTORY = 120;
+export const PET_EGG_ID = 'item_pet_egg';
 
 // White -> Yellow -> Green -> Blue -> Purple -> Gold -> Orange -> Red
 export const RARITY_COLORS: Record<ItemRarity, string> = {
@@ -94,9 +95,58 @@ export const GAME_SETS: GameSet[] = [
 
 export const ENCHANT_CONFIG = {
   MAX_LEVEL: 10,
-  // Success rate at current level to reach next (e.g., Index 0 is 0->1, Index 9 is 9->10)
   SUCCESS_RATES: [1.0, 0.90, 0.80, 0.70, 0.60, 0.50, 0.40, 0.30, 0.20, 0.10],
-  // Multiplier for item stats based on enchant level [Level 0, Level 1, ...]
   STAT_MULTIPLIERS: [1.0, 1.1, 1.25, 1.45, 1.70, 2.0, 2.4, 2.9, 3.5, 4.5, 6.0],
   COST_PER_ATTEMPT: 1,
 };
+
+export const PET_BREEDS: PetBreed[] = [
+  {
+    id: 'breed_turtle',
+    name: '大海龟',
+    avatarStyle: 'thumbs', // Placeholder, we use seed prefix
+    desc: '防御资质优秀的入门宠物。',
+    minQualities: { atk: 900, def: 1300, hp: 3500, spd: 800, grow: 1.05 },
+    maxQualities: { atk: 1100, def: 1550, hp: 4500, spd: 1000, grow: 1.15 }
+  },
+  {
+    id: 'breed_wolf',
+    name: '幽灵狼',
+    avatarStyle: 'avataaars', 
+    desc: '攻击与速度并存的猎手。',
+    minQualities: { atk: 1300, def: 900, hp: 3000, spd: 1300, grow: 1.10 },
+    maxQualities: { atk: 1500, def: 1100, hp: 3800, spd: 1500, grow: 1.20 }
+  },
+  {
+    id: 'breed_vampire',
+    name: '吸血鬼',
+    avatarStyle: 'bottts', 
+    desc: '拥有极高攻击资质的强力宠物。',
+    minQualities: { atk: 1400, def: 1000, hp: 3200, spd: 1200, grow: 1.15 },
+    maxQualities: { atk: 1600, def: 1200, hp: 4000, spd: 1400, grow: 1.25 }
+  },
+  {
+    id: 'breed_angel',
+    name: '灵鹤',
+    avatarStyle: 'croodles', 
+    desc: '法力高深，速度极快。',
+    minQualities: { atk: 1100, def: 1100, hp: 3200, spd: 1400, grow: 1.18 },
+    maxQualities: { atk: 1300, def: 1300, hp: 4200, spd: 1600, grow: 1.26 }
+  },
+  {
+    id: 'breed_golem',
+    name: '熔岩巨兽',
+    avatarStyle: 'shapes', 
+    desc: '拥有令人绝望的体力和防御。',
+    minQualities: { atk: 1000, def: 1500, hp: 5000, spd: 800, grow: 1.12 },
+    maxQualities: { atk: 1200, def: 1700, hp: 6500, spd: 900, grow: 1.22 }
+  },
+  {
+    id: 'breed_dragon',
+    name: '超级神龙',
+    avatarStyle: 'lorelei', 
+    desc: '传说中的神兽，各项资质完美。',
+    minQualities: { atk: 1500, def: 1400, hp: 5000, spd: 1400, grow: 1.25 },
+    maxQualities: { atk: 1700, def: 1600, hp: 6000, spd: 1600, grow: 1.30 }
+  }
+];

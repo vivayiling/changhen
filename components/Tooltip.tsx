@@ -1,8 +1,8 @@
 
 import React, { useMemo } from 'react';
 import { Item, EquipmentSlot } from '../types';
-import { RARITY_COLORS, RARITY_BG_COLORS, GAME_SETS, ENCHANT_CONFIG } from '../constants';
-import { Lock, Unlock, Gem, ArrowUpCircle } from 'lucide-react';
+import { RARITY_COLORS, RARITY_BG_COLORS, GAME_SETS, ENCHANT_CONFIG, PET_EGG_ID } from '../constants';
+import { Lock, Unlock, Gem, ArrowUpCircle, Egg } from 'lucide-react';
 
 interface TooltipProps {
   item: Item;
@@ -11,12 +11,13 @@ interface TooltipProps {
   onUnequip?: (item: Item) => void;
   onLock?: (item: Item) => void; 
   onEnchant?: (item: Item) => void;
+  onUse?: (item: Item) => void; // New Handler for consumables
   onClose?: () => void;
   playerEquipment?: Partial<Record<EquipmentSlot, Item>>; 
-  playerStones?: number; // Added to check for resource
+  playerStones?: number; 
 }
 
-export const ItemTooltip: React.FC<TooltipProps> = ({ item, onEquip, onSell, onUnequip, onLock, onEnchant, onClose, playerEquipment, playerStones = 0 }) => {
+export const ItemTooltip: React.FC<TooltipProps> = ({ item, onEquip, onSell, onUnequip, onLock, onEnchant, onUse, onClose, playerEquipment, playerStones = 0 }) => {
   
   const setInfo = useMemo(() => {
     if (!item.isSet || !item.setId) return null;
@@ -44,11 +45,49 @@ export const ItemTooltip: React.FC<TooltipProps> = ({ item, onEquip, onSell, onU
   const canEnchant = item.usedEnchantSlots < item.maxEnchantSlots && item.enchantLevel < ENCHANT_CONFIG.MAX_LEVEL;
   const hasResource = playerStones >= ENCHANT_CONFIG.COST_PER_ATTEMPT;
 
+  // Comparison Helpers
+  const getComparisonItem = () => {
+      if (!playerEquipment || !item.type || item.type === 'consumable') return null;
+      return playerEquipment[item.type as EquipmentSlot];
+  };
+  const comparisonItem = getComparisonItem();
+
+  const getStatDiff = (statType: string, val: number) => {
+      if (!comparisonItem) return null;
+      // find stat in comparison item
+      let compVal = 0;
+      if (comparisonItem.baseStat && ((comparisonItem.type === EquipmentSlot.WEAPON && statType === '攻击力') || (comparisonItem.type !== EquipmentSlot.WEAPON && statType === '护甲'))) {
+          // Check base stat match
+          // Simplified: Base stats are separate in UI, let's just match list
+      }
+      
+      const compStat = comparisonItem.stats.find(s => s.type === statType);
+      if (compStat) {
+           const compMult = ENCHANT_CONFIG.STAT_MULTIPLIERS[comparisonItem.enchantLevel] || 1;
+           compVal = compStat.isPercentage ? Number((compStat.value * compMult).toFixed(1)) : Math.floor(compStat.value * compMult);
+      }
+      
+      const diff = val - compVal;
+      if (diff === 0) return null;
+      return diff;
+  };
+
+  const getBaseStatDiff = () => {
+      if (!comparisonItem || !item.baseStat || !comparisonItem.baseStat) return null;
+      const compMult = ENCHANT_CONFIG.STAT_MULTIPLIERS[comparisonItem.enchantLevel] || 1;
+      const compBase = Math.floor(comparisonItem.baseStat * compMult);
+      const currBase = Math.floor(item.baseStat * currentMult);
+      return currBase - compBase;
+  };
+  
+  const baseStatDiff = getBaseStatDiff();
+
   const getStatValue = (val: number, isPercent?: boolean) => {
-      // Display current * effective value
       const effective = isPercent ? Number((val * currentMult).toFixed(1)) : Math.floor(val * currentMult);
       return effective;
   }
+
+  const isEgg = item.consumableType === 'pet_egg';
 
   return (
     <div className={`p-3 rounded-lg border backdrop-blur-xl shadow-2xl w-72 max-w-[85vw] ${RARITY_BG_COLORS[item.rarity]} flex flex-col relative overflow-hidden transition-all duration-300`}>
@@ -65,28 +104,53 @@ export const ItemTooltip: React.FC<TooltipProps> = ({ item, onEquip, onSell, onU
         )}
       </div>
       <div className="text-[10px] text-slate-400 mb-2 font-medium flex justify-between items-center border-b border-white/5 pb-1">
-        <span>{item.rarity} {item.type}</span>
+        <span>{item.rarity} {item.type === 'consumable' ? '消耗品' : item.type}</span>
         <span className="bg-black/40 px-1.5 py-0.5 rounded text-slate-300">Lv.{item.level}</span>
       </div>
       
       <div className="space-y-1 text-xs text-slate-200 mb-3 bg-black/40 p-2.5 rounded border border-white/5 shadow-inner">
+        {isEgg && (
+            <div className="text-center py-4 text-slate-300 italic">
+                孵化此蛋可获得一只随机宠物。
+            </div>
+        )}
+
         {item.baseStat ? (
-          <div className="text-white font-bold pb-1 border-b border-white/10 mb-1 flex justify-between">
+          <div className="text-white font-bold pb-1 border-b border-white/10 mb-1 flex justify-between items-center">
             <span>{item.type === EquipmentSlot.WEAPON ? `攻击力` : `护甲`}</span>
-            <span className="text-emerald-300">+{Math.floor(item.baseStat * currentMult)}</span>
+            <div className="flex items-center gap-1">
+                <span className="text-emerald-300">+{Math.floor(item.baseStat * currentMult)}</span>
+                {baseStatDiff !== null && (
+                    <span className={`text-[10px] ${baseStatDiff > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        ({baseStatDiff > 0 ? '+' : ''}{baseStatDiff})
+                    </span>
+                )}
+            </div>
           </div>
         ) : null}
         
-        {item.stats.map((stat, idx) => (
-          <div key={idx} className="flex justify-between items-center">
-             <span className="text-slate-400 scale-90 origin-left">{stat.type}</span>
-             <span className="text-blue-300 font-mono font-bold">
-               +{getStatValue(stat.value, stat.isPercentage)}
-               {['暴击率','闪避率','减伤','增伤','吸血','攻击速度', '生命值', '护甲', '攻击力'].includes(stat.type) && stat.isPercentage ? '%' : (['暴击率','闪避率','减伤','增伤','吸血','攻击速度'].includes(stat.type) ? '%' : '')}
-             </span>
-          </div>
-        ))}
-        {item.stats.length === 0 && !item.baseStat && <div className="text-slate-500 italic text-[10px]">暂无额外属性</div>}
+        {item.stats.map((stat, idx) => {
+           const finalVal = getStatValue(stat.value, stat.isPercentage);
+           const diff = getStatDiff(stat.type, finalVal);
+           
+           return (
+              <div key={idx} className="flex justify-between items-center">
+                 <span className="text-slate-400 scale-90 origin-left">{stat.type}</span>
+                 <div className="flex items-center gap-1">
+                     <span className="text-blue-300 font-mono font-bold">
+                       +{finalVal}
+                       {['暴击率','闪避率','减伤','增伤','吸血','攻击速度', '生命值', '护甲', '攻击力'].includes(stat.type) && stat.isPercentage ? '%' : (['暴击率','闪避率','减伤','增伤','吸血','攻击速度'].includes(stat.type) ? '%' : '')}
+                     </span>
+                     {diff !== null && (
+                        <span className={`text-[9px] font-mono ${diff > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                           {diff > 0 ? '↑' : '↓'} {Math.abs(Number(diff.toFixed(1)))}
+                        </span>
+                     )}
+                 </div>
+              </div>
+           );
+        })}
+        {item.stats.length === 0 && !item.baseStat && !isEgg && <div className="text-slate-500 italic text-[10px]">暂无额外属性</div>}
 
         {/* Set Item Section */}
         {setInfo && (
@@ -111,6 +175,7 @@ export const ItemTooltip: React.FC<TooltipProps> = ({ item, onEquip, onSell, onU
       </div>
 
       {/* Enchant Workshop */}
+      {!isEgg && (
       <div className="bg-gradient-to-br from-pink-950/40 to-slate-900/40 border border-pink-500/20 rounded p-2 mb-2">
          <div className="flex justify-between items-center mb-1">
              <span className="text-[10px] font-bold text-pink-300 flex items-center gap-1"><Gem size={10}/> 启灵工坊</span>
@@ -140,6 +205,7 @@ export const ItemTooltip: React.FC<TooltipProps> = ({ item, onEquip, onSell, onU
             </div>
          )}
       </div>
+      )}
 
       <div className="flex justify-between items-center mb-2">
           <div className="text-[10px] text-slate-500">稀有度: <span className={RARITY_COLORS[item.rarity]}>{item.rarity}</span></div>
@@ -147,7 +213,16 @@ export const ItemTooltip: React.FC<TooltipProps> = ({ item, onEquip, onSell, onU
       </div>
 
       <div className="flex gap-1.5 mt-auto">
-        {onEquip && (
+        {onUse && isEgg && (
+            <button
+                onClick={() => onUse(item)}
+                className="flex-[2] bg-green-600 hover:bg-green-500 border border-green-400/50 text-white text-xs py-1.5 rounded font-bold shadow-lg active:scale-95"
+            >
+                <Egg size={12} className="inline mr-1"/> 孵化
+            </button>
+        )}
+        
+        {onEquip && !isEgg && (
           <button 
             onClick={() => onEquip(item)}
             className="flex-[2] bg-indigo-600 hover:bg-indigo-500 border border-indigo-400/50 text-white text-xs py-1.5 rounded font-bold shadow-lg active:scale-95"

@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Sword, Shield, Brain, Heart, Zap, Play, Pause, Backpack, TrendingUp, RefreshCcw, User, Gem, Sparkles, Map, ChevronUp, ArrowLeft, Info, Activity, Skull, ShieldCheck, X, Footprints, Crown, Shirt, Hand, Settings, Lock, Trash2, CheckSquare, Square, Axe, Hammer, Wand, Crosshair, Columns, ScrollText, Save, RotateCcw, Clock, Users } from 'lucide-react';
-import { Player, Enemy, GameLog, Item, EquipmentSlot, PlayerStats, ItemRarity, CombatUnit, Hero, DerivedStats } from './types';
-import { EXP_TABLE, MAX_INVENTORY, RARITY_COLORS, LEVEL_CAP, RARITY_BG_COLORS, ENCHANT_CONFIG } from './constants';
-import { calculateDerivedStats, calculateDamage, generateEnemies, generateItem } from './services/gameEngine';
+import { Sword, Shield, Brain, Heart, Zap, Play, Pause, Backpack, TrendingUp, RefreshCcw, User, Gem, Sparkles, Map, ChevronUp, ArrowLeft, Info, Activity, Skull, ShieldCheck, X, Footprints, Crown, Shirt, Hand, Settings, Lock, Trash2, CheckSquare, Square, Axe, Hammer, Wand, Crosshair, Columns, ScrollText, Save, RotateCcw, Clock, Users, Egg, Dog, Bird } from 'lucide-react';
+import { Player, Enemy, GameLog, Item, EquipmentSlot, PlayerStats, ItemRarity, CombatUnit, Hero, DerivedStats, Pet, PetBreed } from './types';
+import { EXP_TABLE, MAX_INVENTORY, RARITY_COLORS, LEVEL_CAP, RARITY_BG_COLORS, ENCHANT_CONFIG, PET_BREEDS } from './constants';
+import { calculateDerivedStats, calculateDamage, generateEnemies, generateItem, generatePet } from './services/gameEngine';
 import { ItemTooltip } from './components/Tooltip';
 
 // --- Types for Visuals ---
@@ -92,7 +91,7 @@ const loadState = <T,>(key: string, fallback: T): T => {
 
 export default function App() {
   // --- State ---
-  const [activeTab, setActiveTab] = useState<'role' | 'bag' | 'stage'>('role');
+  const [activeTab, setActiveTab] = useState<'role' | 'bag' | 'stage' | 'pet'>('role');
   const [showRoleDetail, setShowRoleDetail] = useState(false);
   const [autoBattle, setAutoBattle] = useState(false);
   const [invincible, setInvincible] = useState(false); 
@@ -112,7 +111,7 @@ export default function App() {
   
   // Player State (Persistent)
   const [player, setPlayer] = useState<Player>(() => {
-    // Migration Logic for Old Saves (from Single Player to Party)
+    // Migration Logic
     const saved = localStorage.getItem(STORAGE_KEYS.PLAYER);
     let loadedData: any = {};
     if (saved) {
@@ -132,69 +131,47 @@ export default function App() {
         isLeader: true
     };
 
-    // 1. Old Save Migration (No heroes array)
-    if (loadedData.baseStats && !loadedData.heroes) {
-        // Ensure baseStats is valid
-        const stats = { ...defaultBaseStats, ...loadedData.baseStats };
-        defaultHero.baseStats = stats;
-        defaultHero.level = loadedData.level || 1;
-        defaultHero.equipment = loadedData.equipment || {};
-        
-        return {
-            gold: loadedData.gold || 0,
-            enchantStones: loadedData.enchantStones || 0,
-            currentExp: loadedData.currentExp || 0,
-            maxExp: loadedData.maxExp || EXP_TABLE(1),
-            level: loadedData.level || 1,
-            heroes: [defaultHero],
-            inventory: loadedData.inventory || [],
-            maxInventorySize: MAX_INVENTORY,
-            autoSellSettings: loadedData.autoSellSettings || {}
-        };
-    } 
-    
-    // 2. Existing Party Save Check
-    if (loadedData.heroes && Array.isArray(loadedData.heroes) && loadedData.heroes.length > 0) {
-        // Validate Hero 0 (Main Character) to prevent crashes
-        // We use map to ensure we don't mutate the potentially malformed object in place
-        // and guarantee baseStats exists.
-        const validatedHeroes = loadedData.heroes.map((h: any, idx: number) => {
-            if (idx === 0) {
-                 return {
-                     ...h,
-                     baseStats: h.baseStats ? { ...defaultBaseStats, ...h.baseStats } : defaultBaseStats,
-                     equipment: h.equipment || {}
-                 };
-            }
-            return h;
-        });
-        
-        return {
-             gold: 0,
-             enchantStones: 0,
-             currentExp: 0,
-             maxExp: EXP_TABLE(1),
-             level: 1,
-             inventory: [],
-             maxInventorySize: MAX_INVENTORY,
-             autoSellSettings: {},
-             ...loadedData,
-             heroes: validatedHeroes
-        };
-    }
-
-    // 3. Fresh Game
-    return {
+    const initialPlayer = {
         gold: 0,
         enchantStones: 0,
         currentExp: 0,
         maxExp: EXP_TABLE(1),
         level: 1,
         heroes: [defaultHero],
+        pets: [], // Default empty pets
         inventory: [],
         maxInventorySize: MAX_INVENTORY,
         autoSellSettings: {}
     };
+
+    if (loadedData) {
+        // Ensure pets array exists in old save
+        if (!loadedData.pets) loadedData.pets = [];
+        
+        // Ensure heroes exists and is valid
+        if (loadedData.heroes && Array.isArray(loadedData.heroes)) {
+            loadedData.heroes = loadedData.heroes.map((h: any, idx: number) => {
+                if (idx === 0) {
+                     return {
+                         ...h,
+                         baseStats: h.baseStats ? { ...defaultBaseStats, ...h.baseStats } : defaultBaseStats,
+                         equipment: h.equipment || {}
+                     };
+                }
+                return h;
+            });
+        } else if (loadedData.baseStats) {
+             // Old single hero migration
+             initialPlayer.heroes[0].baseStats = { ...defaultBaseStats, ...loadedData.baseStats };
+             initialPlayer.heroes[0].equipment = loadedData.equipment || {};
+             initialPlayer.heroes[0].level = loadedData.level || 1;
+             return { ...initialPlayer, ...loadedData, heroes: initialPlayer.heroes };
+        }
+        
+        return { ...initialPlayer, ...loadedData };
+    }
+
+    return initialPlayer;
   });
 
   // Capture last save time on init (before effects run)
@@ -240,15 +217,20 @@ export default function App() {
   }, [player, currentLevel, highestLevel, killCount]);
 
   // --- Initialize Combat State ---
-  // When entering a stage or loading, we need to init CombatUnits from Player Heroes
   const initCombatUnits = useCallback(() => {
       const allies: CombatUnit[] = player.heroes.map(hero => {
-          // Safety check for baseStats in case they are missing
           const safeHero = {
               ...hero,
               baseStats: hero.baseStats || { str: 5, dex: 5, int: 5, vit: 5, spi: 5, freePoints: 0 }
           };
-          const stats = calculateDerivedStats(safeHero);
+          const stats = calculateDerivedStats(safeHero, player.pets);
+          
+          let petAvatarSeed: string | undefined = undefined;
+          if (hero.activePetId) {
+             const pet = player.pets.find(p => p.id === hero.activePetId);
+             if (pet) petAvatarSeed = pet.avatarSeed;
+          }
+
           return {
               id: hero.id,
               isAlly: true,
@@ -257,14 +239,14 @@ export default function App() {
               currentHp: stats.maxHp,
               maxHp: stats.maxHp,
               stats: stats,
-              avatarSeed: hero.avatarSeed
+              avatarSeed: hero.avatarSeed,
+              petAvatarSeed // Add visual pet
           };
       });
       setCombatAllies(allies);
-  }, [player.heroes]);
+  }, [player.heroes, player.pets]);
 
   useEffect(() => {
-      // Only init if empty (first load)
       if (combatAllies.length === 0) {
           initCombatUnits();
       }
@@ -297,15 +279,12 @@ export default function App() {
                let newHeroes = [...prev.heroes];
                let levelsGained = 0;
 
-               // Simple leveling logic for main hero (Leader) for offline
-               // Ideally should loop through party
                while (nextExp >= nextMaxExp && nextLvl < LEVEL_CAP) {
                    nextExp -= nextMaxExp;
                    nextLvl++;
                    nextMaxExp = EXP_TABLE(nextLvl);
                    levelsGained++;
                    
-                   // Update Hero 0 stats
                    if (newHeroes[0]) {
                        newHeroes[0] = {
                            ...newHeroes[0],
@@ -350,26 +329,15 @@ export default function App() {
 
   const addFloatingText = (value: string, unitIndex: number, isAlly: boolean, type: 'damage' | 'gold' | 'exp' | 'heal' | 'loot', isCrit: boolean = false, rarity?: ItemRarity) => {
     const id = Math.random().toString();
-    
-    // Calculate Position based on 5v5 Grid
-    // Allies (Left): Top to Bottom. Enemies (Right): Top to Bottom.
-    // Base Y is 20% to 80% screen height.
     const rowHeight = 15; // %
     const startY = 30; // %
-    
-    // Allies X ~ 25%, Enemies X ~ 75%
     const baseX = isAlly ? 25 : 75;
     const baseY = startY + (unitIndex * rowHeight);
-    
     const x = baseX + (Math.random() * 6 - 3);
     const y = baseY + (Math.random() * 6 - 3);
     
     let color = 'text-white';
-    
-    if (type === 'gold') {
-        // Gold always spawns center-ish
-        color = 'text-yellow-400 font-black text-2xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] z-50';
-    }
+    if (type === 'gold') color = 'text-yellow-400 font-black text-2xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] z-50';
     else if (type === 'exp') color = 'text-purple-400 font-bold text-xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] z-50';
     else if (type === 'heal') color = 'text-green-500 font-bold text-xl';
     else if (type === 'loot') {
@@ -379,7 +347,6 @@ export default function App() {
         if (isCrit) color = 'text-yellow-300 font-black text-3xl drop-shadow-[0_4px_0_rgba(0,0,0,1)]';
         else color = isAlly ? 'text-red-500 font-bold text-xl' : 'text-white font-bold text-xl';
     }
-    
     setFloatingTexts(prev => [...prev, { id, value, x, y, color, scale: isCrit }]);
     const duration = type === 'loot' ? 2000 : 1000;
     setTimeout(() => setFloatingTexts(prev => prev.filter(ft => ft.id !== id)), duration);
@@ -387,7 +354,6 @@ export default function App() {
 
   const getMainHero = (): Hero => {
     const h = player.heroes[0];
-    // Fail-safe to prevent crash if data is corrupted
     if (!h || !h.baseStats) {
         return {
             id: h?.id || 'hero_main',
@@ -403,6 +369,8 @@ export default function App() {
   };
 
   const getItemIcon = (item: Item | null, slot?: EquipmentSlot) => {
+    if (item?.consumableType === 'pet_egg') return Egg;
+
     if (!item) {
         if (slot === EquipmentSlot.WEAPON) return Sword;
         if (slot === EquipmentSlot.HELMET) return Crown;
@@ -426,15 +394,14 @@ export default function App() {
     if (item.type === EquipmentSlot.LEGS) return Columns; 
     if (item.type === EquipmentSlot.GLOVES) return Hand;
     if (item.type === EquipmentSlot.BOOTS) return Footprints;
-    if ([EquipmentSlot.RING1, EquipmentSlot.RING2, EquipmentSlot.NECKLACE, EquipmentSlot.AMULET].includes(item.type)) return Gem;
+    if ([EquipmentSlot.RING1, EquipmentSlot.RING2, EquipmentSlot.NECKLACE, EquipmentSlot.AMULET].includes(item.type as EquipmentSlot)) return Gem;
 
     return Shield;
   };
 
   // --- Actions ---
   const upgradeStat = (stat: keyof PlayerStats) => {
-    const hero = player.heroes[0]; // Upgrade Main Hero
-    // Optional chain check to prevent crash if baseStats undefined
+    const hero = player.heroes[0]; 
     if (hero?.baseStats?.freePoints > 0) {
       setUpgradingStat(stat);
       setTimeout(() => setUpgradingStat(null), 500); 
@@ -453,15 +420,14 @@ export default function App() {
           }
           return { ...prev, heroes: newHeroes };
       });
-      // Update combat stats if in combat
       initCombatUnits(); 
     }
   };
 
   const equipItem = (item: Item) => {
     setPlayer(prev => {
-      const heroIdx = 0; // Default to main hero
-      const slot = item.type;
+      const heroIdx = 0; 
+      const slot = item.type as EquipmentSlot;
       const oldItem = prev.heroes[heroIdx].equipment[slot];
       
       const newInventory = prev.inventory.filter(i => i.id !== item.id);
@@ -477,7 +443,6 @@ export default function App() {
     });
     addLog(`装备了 ${item.name}`, 'system');
     setViewingItem(null); 
-    // Re-init combat stats to reflect equipment change
     setTimeout(() => initCombatUnits(), 10);
   };
 
@@ -490,7 +455,7 @@ export default function App() {
        const heroIdx = 0;
        const newHeroes = [...prev.heroes];
        const newEquipment = { ...newHeroes[heroIdx].equipment };
-       delete newEquipment[item.type];
+       delete newEquipment[item.type as EquipmentSlot];
        newHeroes[heroIdx] = { ...newHeroes[heroIdx], equipment: newEquipment };
 
        return { ...prev, heroes: newHeroes, inventory: [...prev.inventory, item] }
@@ -510,13 +475,35 @@ export default function App() {
     setViewingItem(null);
   };
 
+  // Pet Actions
+  const handleHatchEgg = (item: Item) => {
+     const newPet = generatePet(1);
+     setPlayer(prev => ({
+         ...prev,
+         inventory: prev.inventory.filter(i => i.id !== item.id),
+         pets: [...prev.pets, newPet]
+     }));
+     addLog(`孵化成功！获得了宠物: ${newPet.name}`, 'loot');
+     setViewingItem(null);
+  };
+
+  const equipPet = (petId: string) => {
+      setPlayer(prev => {
+          const newHeroes = [...prev.heroes];
+          if (newHeroes[0]) {
+              newHeroes[0] = {
+                  ...newHeroes[0],
+                  activePetId: newHeroes[0].activePetId === petId ? undefined : petId
+              };
+          }
+          return { ...prev, heroes: newHeroes };
+      });
+      setTimeout(() => initCombatUnits(), 10);
+  };
+
   const toggleLock = (item: Item) => {
-    // Check inventory or equipment
     setPlayer(prev => {
-        // Toggle in inventory
         const newInventory = prev.inventory.map((i: Item) => i.id === item.id ? { ...i, isLocked: !i.isLocked } : i);
-        
-        // Toggle in equipment (scan all heroes)
         const newHeroes = prev.heroes.map(hero => {
              const newEq = { ...hero.equipment };
              Object.entries(hero.equipment).forEach(([slot, eqItem]) => {
@@ -576,7 +563,6 @@ export default function App() {
     }
   };
 
-  // Enchant (Qi Ling) Logic
   const handleEnchant = (item: Item) => {
      if (player.enchantStones < ENCHANT_CONFIG.COST_PER_ATTEMPT) {
          addLog("启灵石不足！", "system");
@@ -634,35 +620,27 @@ export default function App() {
      setTimeout(() => initCombatUnits(), 10);
   };
 
-  // --- Calculate Idle Income (Est) ---
   const calculateEstimatedIncome = () => {
-      const avgKillTimeSeconds = 6; // Est
+      const avgKillTimeSeconds = 6; 
       const killsPerHour = 3600 / avgKillTimeSeconds;
       
       const enemyLevel = currentLevel;
-      // Rough Calc based on enemy gen logic
       const scale = 1.0;
       const gold = Math.floor((15 + enemyLevel * 3) * scale);
       const exp = Math.floor((30 + enemyLevel * 8) * scale);
       
       return {
-          goldPerHour: Math.floor(gold * killsPerHour * 0.8), // 80% efficiency
+          goldPerHour: Math.floor(gold * killsPerHour * 0.8), 
           expPerHour: Math.floor(exp * killsPerHour * 0.8)
       };
   };
 
-  // --- Game Loop (Multi-vs-Multi) ---
   useEffect(() => {
     if (!autoBattle) return;
 
-    // 1. Check for Enemies
     if (combatEnemiesRef.current.length === 0 && !isSearchingRef.current) {
       const isBossStage = killCountRef.current >= 4;
-      
-      // Generate Group
       const rawEnemies = generateEnemies(currentLevel, combatAlliesRef.current.length, isBossStage);
-      
-      // Convert to CombatUnits
       const newCombatEnemies: CombatUnit[] = rawEnemies.map(e => ({
           id: e.id,
           isAlly: false,
@@ -671,14 +649,15 @@ export default function App() {
           maxHp: e.maxHp,
           currentHp: e.currentHp,
           isBoss: e.isBoss,
-          stats: { // Simplified stats for enemy
+          stats: { 
              hp: e.maxHp, maxHp: e.maxHp,
              attack: e.attack, armor: e.armor,
              critRate: 5, critDmg: 50, dodge: 0,
              hpRegen: 0, speed: 1, lifesteal: 0,
              armorPen: 0, dmgRed: 0, dmgInc: 0, atkSpeed: 0
           } as DerivedStats,
-          avatarSeed: e.avatarSeed
+          avatarSeed: e.avatarSeed,
+          petAvatarSeed: e.petAvatarSeed // Map the generated pet visual to the combat unit
       }));
 
       setCombatEnemies(newCombatEnemies);
@@ -690,8 +669,6 @@ export default function App() {
       if (isSearchingRef.current) return; 
       if (combatEnemiesRef.current.length === 0) return;
 
-      // 2. Resolve Turn
-      // Filter Alive
       const aliveAllies = combatAlliesRef.current.filter(u => u.currentHp > 0);
       const aliveEnemies = combatEnemiesRef.current.filter(u => u.currentHp > 0);
 
@@ -700,25 +677,20 @@ export default function App() {
           return;
       }
 
-      // --- Allies Attack ---
       const newEnemyState = [...combatEnemiesRef.current];
       const newAllyState = [...combatAlliesRef.current];
 
       aliveAllies.forEach((ally) => {
-          // Find ally index in main array
           const allyIdx = newAllyState.findIndex(u => u.id === ally.id);
           if (allyIdx === -1) return;
 
-          // Pick Target
           const validTargets = newEnemyState.filter(e => e.currentHp > 0);
           if (validTargets.length === 0) return;
           const target = validTargets[Math.floor(Math.random() * validTargets.length)];
           const targetIdx = newEnemyState.findIndex(u => u.id === target.id);
 
-          // Animate Ally
           newAllyState[allyIdx].animState = 'animate-lunge-right';
           
-          // Calculate Damage
           let pDmg = 0;
           let pCrit = false;
           
@@ -734,17 +706,14 @@ export default function App() {
              pCrit = res.isCrit;
           }
 
-          // Apply Dmg to target
           const newHp = Math.max(0, target.currentHp - pDmg);
           newEnemyState[targetIdx].currentHp = newHp;
           newEnemyState[targetIdx].animState = 'animate-hit';
 
-          // Floating Text
           setTimeout(() => {
              addFloatingText(pCrit ? `${pDmg}!` : `${pDmg}`, targetIdx, false, 'damage', pCrit);
           }, 150);
 
-          // Lifesteal
           if (ally.stats.lifesteal > 0 && pDmg > 0 && !invincibleRef.current) {
                const heal = Math.floor(pDmg * (ally.stats.lifesteal / 100));
                if (heal > 0) {
@@ -755,8 +724,6 @@ export default function App() {
           }
       });
 
-      // --- Enemies Attack ---
-      // Re-filter living enemies after ally attack
       const currentlyAliveEnemies = newEnemyState.filter(e => e.currentHp > 0);
 
       currentlyAliveEnemies.forEach((enemy) => {
@@ -766,13 +733,6 @@ export default function App() {
           if (validTargets.length === 0) return;
           const target = validTargets[Math.floor(Math.random() * validTargets.length)];
           const targetIdx = newAllyState.findIndex(u => u.id === target.id);
-
-          // Animate Enemy
-          setTimeout(() => {
-              // We need to set state via setter to trigger render for animation
-              // This logic inside the loop is tricky with React state.
-              // For simplicity in this "Tick" system, we update the refs and state at the end.
-          }, 250);
 
           newEnemyState[enemyIdx].animState = 'animate-lunge-left';
 
@@ -796,26 +756,23 @@ export default function App() {
                   addFloatingText(`${eDmg}`, targetIdx, true, 'damage', eCrit);
                   setDamageFlash(true);
                   setTimeout(() => setDamageFlash(false), 300);
-              }, 400); // Delayed slightly after player hit
+              }, 400); 
            } else {
                setTimeout(() => addFloatingText("无敌", targetIdx, true, 'heal'), 400);
            }
       });
 
-      // Apply Updates
       setCombatAllies([...newAllyState]);
       setCombatEnemies([...newEnemyState]);
 
-      // Clear Animations after delay
       setTimeout(() => {
           setCombatAllies(prev => prev.map(u => ({ ...u, animState: '' })));
           setCombatEnemies(prev => prev.map(u => ({ ...u, animState: '' })));
       }, 700);
 
-      // Check Death/Victory
       const aliveEnemiesCount = newEnemyState.filter(e => e.currentHp > 0).length;
       if (aliveEnemiesCount === 0) {
-          handleVictory(newEnemyState); // Pass the defeated enemies data to extract loot
+          handleVictory(newEnemyState); 
       }
 
       const aliveAlliesCount = newAllyState.filter(a => a.currentHp > 0).length;
@@ -823,14 +780,12 @@ export default function App() {
           handleDefeat();
       }
 
-    }, 1500); // Turn duration
+    }, 1500); 
 
     return () => clearInterval(intervalId);
   }, [autoBattle, currentLevel, highestLevel, addLog, invincible, isSearching]); 
 
-  // --- Handlers ---
   const handleVictory = (defeatedEnemies: CombatUnit[]) => {
-    // Process Rewards for ALL defeated enemies
     let totalGold = 0;
     let totalExp = 0;
     let drops: Item[] = [];
@@ -838,8 +793,6 @@ export default function App() {
     let isBossEncounter = false;
 
     defeatedEnemies.forEach(e => {
-        // Reconstruct rewards logic (Simplified for CombatUnit)
-        // Ideally CombatUnit should carry reward info.
         const scale = e.isBoss ? 10 : 1;
         const gold = Math.floor((15 + e.level * 3) * scale);
         const exp = Math.floor((30 + e.level * 8) * scale);
@@ -852,7 +805,7 @@ export default function App() {
             stones += Math.floor(Math.random() * 2) + 1;
         }
 
-        const dropChance = e.isBoss ? 1.0 : 0.3; // slightly lower drop rate for groups
+        const dropChance = e.isBoss ? 1.0 : 0.3;
         if (Math.random() < dropChance) {
             drops.push(generateItem(e.level));
         }
@@ -871,8 +824,6 @@ export default function App() {
       let nextExp = prev.currentExp + totalExp;
       let nextLvl = prev.level;
       let nextMaxExp = prev.maxExp;
-      // Points added to generic pool, then allocated? Or added to hero? 
-      // For now, points go to Leader (Player state), which can be distributed.
       
       let nextInv = prev.inventory;
       let addedGold = prev.gold + totalGold;
@@ -897,10 +848,8 @@ export default function App() {
         nextLvl++;
         nextMaxExp = EXP_TABLE(nextLvl);
         
-        // Upgrade all heroes level
         prev.heroes.forEach(h => {
             h.level = nextLvl;
-            // Ensure baseStats exists before modifying
             if (!h.baseStats) {
                 h.baseStats = { str: 5, dex: 5, int: 5, vit: 5, spi: 5, freePoints: 0 };
             }
@@ -922,12 +871,11 @@ export default function App() {
         maxExp: nextMaxExp,
         level: nextLvl,
         gold: addedGold,
-        heroes: [...prev.heroes], // Updated levels inside loop
+        heroes: [...prev.heroes], 
         inventory: nextInv
       };
     });
 
-    // Progression
     if (isBossEncounter) {
         addLog("BOSS被击败! 下一层开启", 'system');
         setKillCount(0);
@@ -941,7 +889,6 @@ export default function App() {
         setKillCount(k => k + 1);
     }
 
-    // Regen
     setCombatAllies(prev => prev.map(a => ({ ...a, currentHp: Math.min(a.maxHp, a.currentHp + Math.floor(a.maxHp * 0.3)) })));
     setCombatEnemies([]);
     
@@ -954,10 +901,7 @@ export default function App() {
   const handleDefeat = () => {
     setAutoBattle(false);
     addLog("队伍被击败! 正在撤退...", 'system');
-    
-    // Fully Heal
     initCombatUnits(); 
-    
     setCombatEnemies([]);
     setIsSearching(false);
     setKillCount(0); 
@@ -991,13 +935,14 @@ export default function App() {
 
   const getEquippedItemForComparison = () => {
     if (viewingItem?.source === 'bag') {
-        return getMainHero().equipment[viewingItem.item.type];
+        if (viewingItem.item.type === 'consumable') return null;
+        return getMainHero().equipment[viewingItem.item.type as EquipmentSlot];
     }
     return null;
   };
 
   const comparisonItem = getEquippedItemForComparison();
-  const mainHeroDerived = calculateDerivedStats(getMainHero());
+  const mainHeroDerived = calculateDerivedStats(getMainHero(), player.pets);
   const estIncome = calculateEstimatedIncome();
 
   // --- Render Battlefield Unit ---
@@ -1011,13 +956,24 @@ export default function App() {
           {/* Avatar */}
           <div 
              onClick={() => !isLeft && setShowEnemyDetail(unit)}
-             className={`w-16 h-16 rounded-lg border-2 bg-slate-900/80 overflow-hidden shadow-lg ${unit.currentHp <= 0 ? 'grayscale opacity-50' : ''} ${isLeft ? 'border-indigo-500' : (unit.isBoss ? 'border-red-500 shadow-red-500/50' : 'border-slate-600')} ${!isLeft ? 'cursor-pointer hover:scale-105' : ''}`}
+             className={`w-16 h-16 rounded-lg border-2 bg-slate-900/80 shadow-lg relative ${unit.currentHp <= 0 ? 'grayscale opacity-50' : ''} ${isLeft ? 'border-indigo-500' : (unit.isBoss ? 'border-red-500 shadow-red-500/50' : 'border-slate-600')} ${!isLeft ? 'cursor-pointer hover:scale-105' : ''}`}
           >
               <img 
                  src={`https://api.dicebear.com/9.x/${isLeft ? 'adventurer' : 'bottts-neutral'}/svg?seed=${unit.avatarSeed}&backgroundColor=transparent`}
                  alt={unit.name}
-                 className="w-full h-full object-cover transform scale-110"
+                 className="w-full h-full object-cover transform scale-110 rounded-lg"
               />
+              
+              {/* Pet Overlay (Visual Integration) */}
+              {unit.petAvatarSeed && (
+                  <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full border-2 border-slate-800 bg-slate-900 overflow-hidden shadow-md z-10">
+                      <img 
+                          src={`https://api.dicebear.com/9.x/bottts/svg?seed=${unit.petAvatarSeed}&backgroundColor=transparent`}
+                          alt="Pet"
+                          className="w-full h-full object-cover"
+                      />
+                  </div>
+              )}
           </div>
 
           {/* Damage Flash */}
@@ -1035,7 +991,7 @@ export default function App() {
   return (
     <div className={`h-full w-full bg-black flex flex-col relative overflow-hidden`}>
       
-      {/* Damage Flash Overlay (Global Shake) */}
+      {/* Damage Flash Overlay */}
       {damageFlash && <div className="absolute inset-0 pointer-events-none z-[60] animate-flash-red"></div>}
 
       {/* OFFLINE REPORT MODAL */}
@@ -1105,7 +1061,6 @@ export default function App() {
                       <button onClick={() => setShowBagSettings(false)} className="bg-slate-800 p-1 rounded-full hover:bg-slate-700"><X size={18}/></button>
                   </div>
                   <div className="space-y-4 mb-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
-                      {/* ... (Existing Settings Content) ... */}
                       <div className="space-y-2">
                           <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">自动出售与清理</h3>
                           {Object.values(ItemRarity).map(rarity => (
@@ -1170,6 +1125,7 @@ export default function App() {
                         onSell={viewingItem.source === 'bag' ? sellItem : undefined}
                         onLock={toggleLock}
                         onEnchant={handleEnchant}
+                        onUse={viewingItem.item.type === 'consumable' ? handleHatchEgg : undefined}
                         onClose={() => setViewingItem(null)}
                         playerEquipment={getMainHero().equipment}
                         playerStones={player.enchantStones}
@@ -1260,7 +1216,6 @@ export default function App() {
                             <RenderCombatUnit unit={unit} index={idx} isLeft={true} />
                         </div>
                     ))}
-                    {/* Placeholder if empty (shouldn't happen) */}
                 </div>
 
                 {/* Right Side: Enemies (Up to 5) */}
@@ -1318,7 +1273,6 @@ export default function App() {
                              <div className="text-slate-500 text-xs uppercase mb-1 flex justify-between">
                                 <span>生命值</span>
                                 <span className="text-green-500 font-mono">
-                                    {/* Show HP from Combat State if available, else Max */}
                                     {Math.floor(((combatAllies[0]?.currentHp || mainHeroDerived.maxHp) / mainHeroDerived.maxHp) * 100)}%
                                 </span>
                              </div>
@@ -1380,6 +1334,13 @@ export default function App() {
                             </div>
                             {getMainHero().baseStats.freePoints > 0 && <div className="text-center mt-2"><span className="text-green-400 text-xs font-bold animate-pulse">可用点数: {getMainHero().baseStats.freePoints}</span></div>}
                           </div>
+                          
+                          {getMainHero().activePetId && (
+                              <div className="mt-4 p-3 bg-indigo-900/20 border border-indigo-500/30 rounded-lg">
+                                  <div className="text-xs font-bold text-indigo-300 mb-1 flex items-center gap-2"><Dog size={12}/> 参战宠物</div>
+                                  <div className="text-sm text-indigo-100 font-bold">{player.pets.find(p=>p.id===getMainHero().activePetId)?.name}</div>
+                              </div>
+                          )}
 
                           <div>
                              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 sticky top-0 bg-slate-950 z-10 py-2">高级战斗属性</h3>
@@ -1418,6 +1379,62 @@ export default function App() {
                   </div>
                 )}
               </div>
+            )}
+
+            {/* PET TAB */}
+            {activeTab === 'pet' && (
+                <div className="h-full flex flex-col animate-in fade-in duration-300 pb-24">
+                    <div className="flex justify-between items-center mb-4 sticky top-0 bg-slate-950 z-10 py-2">
+                        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">灵兽栏 ({player.pets.length})</h3>
+                    </div>
+                    {player.pets.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-64 text-slate-500 gap-2">
+                            <Bird size={48} className="opacity-20"/>
+                            <p>暂无宠物，请去背包孵化宠物蛋</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {player.pets.map(pet => {
+                                const isEquipped = getMainHero().activePetId === pet.id;
+                                const breed = PET_BREEDS.find(b => b.id === pet.breedId);
+                                
+                                return (
+                                    <div key={pet.id} className="bg-slate-900 border border-slate-700 rounded-xl p-3 flex gap-3 shadow-lg">
+                                        <div className="w-16 h-16 rounded-lg bg-black/50 border border-slate-600 flex-shrink-0 relative overflow-hidden">
+                                            <img src={`https://api.dicebear.com/9.x/bottts/svg?seed=${pet.avatarSeed}`} className="w-full h-full object-cover"/>
+                                            {isEquipped && <div className="absolute top-0 right-0 bg-green-500 text-black text-[9px] font-bold px-1 rounded-bl">参战</div>}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex justify-between items-start mb-1">
+                                                <div>
+                                                    <h4 className="font-bold text-white text-sm">{pet.name}</h4>
+                                                    <div className="text-[10px] text-slate-400">{breed?.name}</div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className="text-[10px] text-purple-400 font-bold">成长: {pet.qualities.grow}</div>
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] text-slate-400">
+                                                <div className="flex justify-between"><span>攻击</span> <span className="text-slate-200">{pet.qualities.atk}</span></div>
+                                                <div className="flex justify-between"><span>防御</span> <span className="text-slate-200">{pet.qualities.def}</span></div>
+                                                <div className="flex justify-between"><span>体力</span> <span className="text-slate-200">{pet.qualities.hp}</span></div>
+                                                <div className="flex justify-between"><span>速度</span> <span className="text-slate-200">{pet.qualities.spd}</span></div>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col justify-center border-l border-white/5 pl-3">
+                                            <button 
+                                                onClick={() => equipPet(pet.id)}
+                                                className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${isEquipped ? 'bg-red-900/50 text-red-300 border border-red-800' : 'bg-green-600 hover:bg-green-500 text-white'}`}
+                                            >
+                                                {isEquipped ? '休息' : '出战'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
             )}
 
             {/* BAG TAB */}
@@ -1527,21 +1544,28 @@ export default function App() {
          <div className="h-16 bg-slate-950/80 backdrop-blur-md border-t border-white/10 flex justify-around items-center px-2">
             <button 
                onClick={() => { setActiveTab('role'); setShowRoleDetail(false); }}
-               className={`flex flex-col items-center gap-1 p-2 rounded-xl w-20 transition-all ${activeTab === 'role' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-500 hover:text-slate-300'}`}
+               className={`flex flex-col items-center gap-1 p-2 rounded-xl w-16 transition-all ${activeTab === 'role' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-500 hover:text-slate-300'}`}
             >
                <Users size={20} />
                <span className="text-[10px] font-bold">队伍</span>
             </button>
             <button 
+               onClick={() => setActiveTab('pet')}
+               className={`flex flex-col items-center gap-1 p-2 rounded-xl w-16 transition-all ${activeTab === 'pet' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+               <Dog size={20} />
+               <span className="text-[10px] font-bold">灵兽</span>
+            </button>
+            <button 
                onClick={() => setActiveTab('bag')}
-               className={`flex flex-col items-center gap-1 p-2 rounded-xl w-20 transition-all ${activeTab === 'bag' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-500 hover:text-slate-300'}`}
+               className={`flex flex-col items-center gap-1 p-2 rounded-xl w-16 transition-all ${activeTab === 'bag' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-500 hover:text-slate-300'}`}
             >
                <Backpack size={20} />
                <span className="text-[10px] font-bold">背包</span>
             </button>
             <button 
                onClick={() => setActiveTab('stage')}
-               className={`flex flex-col items-center gap-1 p-2 rounded-xl w-20 transition-all ${activeTab === 'stage' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-500 hover:text-slate-300'}`}
+               className={`flex flex-col items-center gap-1 p-2 rounded-xl w-16 transition-all ${activeTab === 'stage' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-500 hover:text-slate-300'}`}
             >
                <Map size={20} />
                <span className="text-[10px] font-bold">关卡</span>

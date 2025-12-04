@@ -52,7 +52,7 @@ export interface GameSet {
 export interface Item {
   id: string;
   name: string;
-  type: EquipmentSlot;
+  type: EquipmentSlot | 'consumable'; // Added consumable type for Eggs
   rarity: ItemRarity;
   level: number;
   stats: ItemStat[];
@@ -66,6 +66,9 @@ export interface Item {
   enchantLevel: number;
   maxEnchantSlots: number;
   usedEnchantSlots: number;
+  
+  // Consumable Props
+  consumableType?: 'pet_egg';
 }
 
 export interface PlayerStats {
@@ -74,7 +77,6 @@ export interface PlayerStats {
   int: number;
   vit: number;
   spi: number;
-  freePoints: number;
 }
 
 export interface DerivedStats {
@@ -97,27 +99,60 @@ export interface DerivedStats {
 
 export type AutoSellSettings = Partial<Record<ItemRarity, boolean>>;
 
-// --- NEW PARTY SYSTEM TYPES ---
+// --- PET SYSTEM ---
+
+export interface PetQualities {
+  atk: number; // 1000 - 1600
+  def: number; // 1000 - 1600
+  hp: number;  // 3000 - 6000
+  spd: number; // 1000 - 1600
+  grow: number; // 1.0 - 1.3 (Growth Rate)
+}
+
+export interface PetBreed {
+  id: string;
+  name: string;
+  avatarStyle: string; 
+  minQualities: Partial<PetQualities>;
+  maxQualities: Partial<PetQualities>;
+  desc: string;
+}
+
+export interface Pet {
+  id: string;
+  breedId: string;
+  name: string;
+  level: number;
+  exp: number;
+  qualities: PetQualities;
+  skills: string[]; // Passive skill names
+  avatarSeed: string;
+  isLocked?: boolean;
+}
+
+// --- PARTY SYSTEM TYPES ---
 
 export interface Hero {
   id: string;
   name: string;
   avatarSeed: string;
   level: number;
-  baseStats: PlayerStats;
+  baseStats: PlayerStats & { freePoints: number };
   equipment: Partial<Record<EquipmentSlot, Item>>;
   isLeader: boolean;
+  activePetId?: string; // Equipped Pet
 }
 
 export interface Player {
   // Global resources
   gold: number;
   enchantStones: number;
-  currentExp: number; // Shared Party EXP? Or Leader EXP? Let's keep it simple: Shared or Leader.
+  currentExp: number; 
   maxExp: number;
-  level: number; // Account/Leader Level
+  level: number; 
   
-  heroes: Hero[]; // The Party (Max 5)
+  heroes: Hero[]; 
+  pets: Pet[]; // Pet Collection
   
   inventory: Item[];
   maxInventorySize: number;
@@ -125,20 +160,21 @@ export interface Player {
 }
 
 export interface Enemy {
-  id: string; // Unique instance ID
+  id: string; 
   name: string;
   level: number;
   maxHp: number;
-  currentHp: number; // Added field
+  currentHp: number; 
   attack: number;
   armor: number;
   expReward: number;
   goldReward: number;
   isBoss: boolean;
   avatarSeed: string;
+  petAvatarSeed?: string; // Visual pet for enemies
 }
 
-// Runtime Combat Object (Used for both Allies and Enemies)
+// Runtime Combat Object
 export interface CombatUnit {
   id: string;
   isAlly: boolean;
@@ -146,9 +182,12 @@ export interface CombatUnit {
   level: number;
   currentHp: number;
   maxHp: number;
-  stats: DerivedStats; // Snapshot of stats at start of combat
+  stats: DerivedStats; 
   isBoss?: boolean;
   avatarSeed: string;
+  
+  // Pet Visual
+  petAvatarSeed?: string;
   
   // Visual state
   animState?: string;

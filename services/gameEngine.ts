@@ -1,4 +1,3 @@
-
 import { 
   Player, 
   Hero,
@@ -7,15 +6,57 @@ import {
   ItemRarity, 
   EquipmentSlot, 
   ItemStat,
-  Enemy
+  Enemy,
+  Pet,
+  PetBreed
 } from '../types';
-import { BASE_ITEM_NAMES, ADJECTIVES, GAME_SETS, ENCHANT_CONFIG } from '../constants';
+import { BASE_ITEM_NAMES, ADJECTIVES, GAME_SETS, ENCHANT_CONFIG, PET_BREEDS, PET_EGG_ID } from '../constants';
 
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+const randomFloat = (min: number, max: number) => Math.random() * (max - min) + min;
 const randomItem = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
-// --- Stats Calculation (Now takes Hero instead of Player) ---
-export const calculateDerivedStats = (hero: Hero): DerivedStats => {
+// --- Pet System ---
+export const generatePet = (level: number): Pet => {
+    // 5% chance for Divine Dragon, else random
+    let breed: PetBreed;
+    if (Math.random() < 0.05) breed = PET_BREEDS.find(b => b.id === 'breed_dragon')!;
+    else breed = randomItem(PET_BREEDS.filter(b => b.id !== 'breed_dragon'));
+    
+    // Calculate Qualities based on breed ranges
+    const qualities = {
+        atk: randomInt(breed.minQualities.atk || 1000, breed.maxQualities.atk || 1200),
+        def: randomInt(breed.minQualities.def || 1000, breed.maxQualities.def || 1200),
+        hp: randomInt(breed.minQualities.hp || 3000, breed.maxQualities.hp || 4000),
+        spd: randomInt(breed.minQualities.spd || 1000, breed.maxQualities.spd || 1200),
+        grow: parseFloat(randomFloat(breed.minQualities.grow || 1.0, breed.maxQualities.grow || 1.1).toFixed(3))
+    };
+
+    return {
+        id: Math.random().toString(36).substr(2, 9),
+        breedId: breed.id,
+        name: breed.name,
+        level: 1,
+        exp: 0,
+        qualities,
+        skills: [],
+        avatarSeed: `${breed.id}_${randomInt(1, 9999)}`
+    };
+};
+
+export const calculatePetBonus = (pet: Pet): Partial<DerivedStats> => {
+    // Simple bonus formula: (Quality / 1000) * Level * Growth
+    const factor = pet.level * pet.qualities.grow;
+    return {
+        attack: Math.floor((pet.qualities.atk / 1000) * factor * 2),
+        armor: Math.floor((pet.qualities.def / 1000) * factor * 1),
+        maxHp: Math.floor((pet.qualities.hp / 1000) * factor * 10),
+        speed: Math.floor((pet.qualities.spd / 1000) * factor * 0.5),
+    };
+};
+
+// --- Stats Calculation ---
+export const calculateDerivedStats = (hero: Hero, allPets: Pet[] = []): DerivedStats => {
   let stats: DerivedStats = {
     attack: 0,
     armor: 0,
@@ -70,7 +111,7 @@ export const calculateDerivedStats = (hero: Hero): DerivedStats => {
     if (item.type === EquipmentSlot.WEAPON) {
         stats.attack += Math.floor((item.baseStat || 0) * enchantMult);
     }
-    else if ([EquipmentSlot.CHEST, EquipmentSlot.HELMET, EquipmentSlot.LEGS, EquipmentSlot.BOOTS, EquipmentSlot.GLOVES].includes(item.type)) {
+    else if ([EquipmentSlot.CHEST, EquipmentSlot.HELMET, EquipmentSlot.LEGS, EquipmentSlot.BOOTS, EquipmentSlot.GLOVES].includes(item.type as EquipmentSlot)) {
       stats.armor += Math.floor((item.baseStat || 0) * enchantMult);
     }
 
@@ -97,6 +138,18 @@ export const calculateDerivedStats = (hero: Hero): DerivedStats => {
       });
     }
   });
+
+  // 4. Pet Bonuses
+  if (hero.activePetId) {
+      const pet = allPets.find(p => p.id === hero.activePetId);
+      if (pet) {
+          const bonus = calculatePetBonus(pet);
+          if (bonus.attack) stats.attack += bonus.attack;
+          if (bonus.armor) stats.armor += bonus.armor;
+          if (bonus.maxHp) stats.maxHp += bonus.maxHp;
+          if (bonus.speed) stats.speed += bonus.speed;
+      }
+  }
 
   // Strength/Int Multipliers (Final)
   stats.attack = Math.floor(stats.attack * (1 + hero.baseStats.str / 100));
@@ -166,6 +219,21 @@ export const calculateDamage = (
 
 // --- Item Generation ---
 export const generateItem = (level: number): Item => {
+  // 3% Chance to drop Pet Egg
+  if (Math.random() < 0.03) {
+      return {
+          id: Math.random().toString(36).substr(2, 9),
+          name: '神秘宠物蛋',
+          type: 'consumable',
+          consumableType: 'pet_egg',
+          rarity: ItemRarity.RARE,
+          level: 1,
+          stats: [],
+          value: 1000,
+          enchantLevel: 0, maxEnchantSlots: 0, usedEnchantSlots: 0
+      } as any;
+  }
+
   const slots = Object.values(EquipmentSlot);
   const slot = randomItem(slots);
   
@@ -261,10 +329,8 @@ export const generateItem = (level: number): Item => {
 
 // --- Enemy Generation ---
 export const generateEnemies = (level: number, partySize: number, forceBoss: boolean = false): Enemy[] => {
-  // Determine enemy count: At least 1, max 5.
-  // Generally match party size +/- 1, capped at 5.
   let enemyCount = Math.max(1, Math.min(5, partySize + randomInt(-1, 1)));
-  if (forceBoss) enemyCount = 1; // Boss usually fights alone or with minimal minions (Let's make Boss alone for now for impact)
+  if (forceBoss) enemyCount = 1; 
 
   const enemies: Enemy[] = [];
   
@@ -272,12 +338,18 @@ export const generateEnemies = (level: number, partySize: number, forceBoss: boo
   const bossNames = ['深渊领主', '虚空主宰', '堕落骑士王', '黑暗吞噬者', '鲜血女王', '骸骨巨龙'];
 
   for (let i = 0; i < enemyCount; i++) {
-    const isBoss = forceBoss && i === 0; // Only the first one is Boss if forced
+    const isBoss = forceBoss && i === 0; 
     const scale = isBoss ? 5.0 : 1.0; 
     
     const baseName = isBoss ? randomItem(bossNames) : randomItem(minionNames);
     
-    // Add letters A, B, C if duplicates names exist (simplified: just random seed handles visuals)
+    // Pet Logic for Enemies: Bosses always have pets, Minions have 30% chance
+    let petAvatarSeed: string | undefined;
+    if (isBoss || Math.random() < 0.3) {
+        const breed = randomItem(PET_BREEDS);
+        petAvatarSeed = `${breed.id}_${randomInt(1, 9999)}`;
+    }
+
     enemies.push({
       id: Math.random().toString(36).substr(2, 9),
       name: baseName,
@@ -289,7 +361,8 @@ export const generateEnemies = (level: number, partySize: number, forceBoss: boo
       expReward: Math.floor((30 + level * 8) * (isBoss ? 10 : 1)), 
       goldReward: Math.floor((15 + level * 3) * (isBoss ? 10 : 1)), 
       isBoss,
-      avatarSeed: `${baseName}-${randomInt(1, 9999)}`
+      avatarSeed: `${baseName}-${randomInt(1, 9999)}`,
+      petAvatarSeed
     });
   }
 
