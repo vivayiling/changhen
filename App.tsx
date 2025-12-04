@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Sword, Shield, Brain, Heart, Zap, Play, Pause, Backpack, TrendingUp, RefreshCcw, User, Gem, Sparkles, Map, ChevronUp, ArrowLeft, Info, Activity, Skull, ShieldCheck, X, Footprints, Crown, Shirt, Hand, Settings, Lock, Trash2, CheckSquare, Square, Axe, Hammer, Wand, Crosshair, Columns, ScrollText, Save, RotateCcw } from 'lucide-react';
+import { Sword, Shield, Brain, Heart, Zap, Play, Pause, Backpack, TrendingUp, RefreshCcw, User, Gem, Sparkles, Map, ChevronUp, ArrowLeft, Info, Activity, Skull, ShieldCheck, X, Footprints, Crown, Shirt, Hand, Settings, Lock, Trash2, CheckSquare, Square, Axe, Hammer, Wand, Crosshair, Columns, ScrollText, Save, RotateCcw, Clock } from 'lucide-react';
 import { Player, Enemy, GameLog, Item, EquipmentSlot, PlayerStats, ItemRarity } from './types';
 import { EXP_TABLE, MAX_INVENTORY, RARITY_COLORS, LEVEL_CAP, RARITY_BG_COLORS, ENCHANT_CONFIG } from './constants';
 import { calculateDerivedStats, calculateDamage, generateEnemy, generateItem } from './services/gameEngine';
@@ -75,7 +75,8 @@ const STORAGE_KEYS = {
   PLAYER: 'changhen_player',
   LEVEL: 'changhen_currentLevel',
   HIGH_LEVEL: 'changhen_highestLevel',
-  KILL_COUNT: 'changhen_killCount'
+  KILL_COUNT: 'changhen_killCount',
+  LAST_SAVE: 'changhen_lastSaveTime'
 };
 
 const loadState = <T,>(key: string, fallback: T): T => {
@@ -98,6 +99,7 @@ export default function App() {
   const [showEnemyDetail, setShowEnemyDetail] = useState(false); 
   const [showBagSettings, setShowBagSettings] = useState(false); 
   const [showLogModal, setShowLogModal] = useState(false);
+  const [offlineReport, setOfflineReport] = useState<{ gold: number, exp: number, timeSpan: string, levelsGained: number } | null>(null);
   
   // Item Inspection State (Modal)
   const [viewingItem, setViewingItem] = useState<{ item: Item, source: 'bag' | 'equip' } | null>(null);
@@ -133,6 +135,9 @@ export default function App() {
     
     return fallback;
   });
+
+  // Capture last save time on init (before effects run)
+  const lastSaveTimeRef = useRef<string | null>(localStorage.getItem(STORAGE_KEYS.LAST_SAVE));
 
   // Combat State
   const [currentHp, setCurrentHp] = useState(100);
@@ -172,14 +177,78 @@ export default function App() {
     localStorage.setItem(STORAGE_KEYS.LEVEL, JSON.stringify(currentLevel));
     localStorage.setItem(STORAGE_KEYS.HIGH_LEVEL, JSON.stringify(highestLevel));
     localStorage.setItem(STORAGE_KEYS.KILL_COUNT, JSON.stringify(killCount));
+    localStorage.setItem(STORAGE_KEYS.LAST_SAVE, Date.now().toString());
   }, [player, currentLevel, highestLevel, killCount]);
+
+  // --- Offline Calculation Effect ---
+  useEffect(() => {
+    const lastSaveStr = lastSaveTimeRef.current;
+    if (lastSaveStr) {
+      const lastSaveTime = parseInt(lastSaveStr, 10);
+      const now = Date.now();
+      const diffSeconds = (now - lastSaveTime) / 1000;
+
+      // Only trigger if offline for more than 60 seconds
+      if (diffSeconds > 60) {
+         // Offline Calculation Logic
+         // Efficiency: 80%
+         // Est. 6 seconds per kill (including searching)
+         const efficiency = 0.8;
+         const secondsPerKill = 6;
+         const kills = Math.floor((diffSeconds / secondsPerKill) * efficiency);
+
+         if (kills > 0) {
+            setPlayer(prev => {
+               // Calculate rewards based on current level enemies
+               // Note: This is a simplified calculation. It doesn't simulate item drops or stage progression.
+               const estGoldPerKill = 15 + prev.level * 3;
+               const estExpPerKill = 30 + prev.level * 8;
+
+               const totalGold = kills * estGoldPerKill;
+               const totalExp = kills * estExpPerKill;
+
+               let nextExp = prev.currentExp + totalExp;
+               let nextLvl = prev.level;
+               let nextMaxExp = prev.maxExp;
+               let points = prev.baseStats.freePoints;
+               let levelsGained = 0;
+
+               while (nextExp >= nextMaxExp && nextLvl < LEVEL_CAP) {
+                   nextExp -= nextMaxExp;
+                   nextLvl++;
+                   nextMaxExp = EXP_TABLE(nextLvl);
+                   points += 5;
+                   levelsGained++;
+               }
+
+               // Format time string
+               let timeSpan = "";
+               if (diffSeconds < 3600) timeSpan = `${Math.floor(diffSeconds / 60)} 分钟`;
+               else timeSpan = `${(diffSeconds / 3600).toFixed(1)} 小时`;
+
+               setOfflineReport({
+                   gold: totalGold,
+                   exp: totalExp,
+                   timeSpan,
+                   levelsGained
+               });
+
+               return {
+                   ...prev,
+                   gold: prev.gold + totalGold,
+                   currentExp: nextExp,
+                   maxExp: nextMaxExp,
+                   level: nextLvl,
+                   baseStats: { ...prev.baseStats, freePoints: points }
+               };
+            });
+         }
+      }
+    }
+  }, []); // Run once on mount
 
   // Init HP on load
   useEffect(() => {
-     // Initialize HP to max on first load to avoid confusion, or could load from storage if we saved it
-     // For now, let's just sync it to max on mount if we want "fresh" session start feels,
-     // OR strictly, we should probably save it. 
-     // Let's set it to max for now to be nice to the player on reload.
      const stats = calculateDerivedStats(player);
      setCurrentHp(stats.maxHp);
   }, []);
@@ -443,7 +512,7 @@ export default function App() {
 
       setTimeout(() => {
         addFloatingText(pCrit ? `${pDmg}!` : `${pDmg}`, 'enemy', 'damage', pCrit);
-        setAnimState(prev => ({ ...prev, enemy: pCrit ? 'animate-hit' : 'animate-shake' }));
+        setAnimState(prev => ({ ...prev, enemy: 'animate-hit' }));
         
         if (pStats.lifesteal > 0 && !invincibleRef.current) {
             const heal = Math.floor(pDmg * (pStats.lifesteal / 100));
@@ -463,6 +532,11 @@ export default function App() {
            return;
         }
       }, 150);
+
+      // Remove hit animation after 300ms (150+300 = 450)
+      setTimeout(() => {
+         setAnimState(prev => prev.enemy === 'animate-hit' ? { ...prev, enemy: '' } : prev);
+      }, 450);
 
       setTimeout(() => {
          if (enemyRef.current && enemyRef.current.currentHp > 0) {
@@ -657,6 +731,54 @@ export default function App() {
       
       {/* Damage Flash Overlay */}
       {damageFlash && <div className="absolute inset-0 pointer-events-none z-[60] animate-flash-red"></div>}
+
+      {/* OFFLINE REPORT MODAL */}
+      {offlineReport && (
+          <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in zoom-in duration-300">
+              <div className="w-full max-w-sm bg-slate-900 border border-yellow-500/30 rounded-2xl p-6 shadow-[0_0_50px_rgba(234,179,8,0.2)] text-center relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-yellow-500 to-transparent"></div>
+                  
+                  <div className="mx-auto w-16 h-16 bg-yellow-900/30 rounded-full flex items-center justify-center mb-4 border border-yellow-500/50 shadow-[0_0_20px_rgba(234,179,8,0.3)]">
+                      <Clock size={32} className="text-yellow-400" />
+                  </div>
+                  
+                  <h2 className="text-2xl font-bold text-white mb-2">欢迎回来</h2>
+                  <p className="text-slate-400 text-sm mb-6">
+                      英雄在你离开的 <span className="text-slate-200 font-bold">{offlineReport.timeSpan}</span> 里仍在英勇战斗。
+                  </p>
+                  
+                  <div className="bg-black/40 rounded-xl p-4 space-y-3 border border-white/5 mb-6">
+                      <div className="flex justify-between items-center">
+                          <span className="text-slate-400 text-sm">获得金币</span>
+                          <span className="text-yellow-400 font-bold font-mono text-lg flex items-center gap-1">
+                              +{offlineReport.gold} <Gem size={14}/>
+                          </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                          <span className="text-slate-400 text-sm">获得经验</span>
+                          <span className="text-purple-400 font-bold font-mono text-lg flex items-center gap-1">
+                              +{offlineReport.exp} <Sparkles size={14}/>
+                          </span>
+                      </div>
+                      {offlineReport.levelsGained > 0 && (
+                          <div className="flex justify-between items-center pt-2 border-t border-white/10 mt-2">
+                              <span className="text-slate-300 text-sm">等级提升</span>
+                              <span className="text-green-400 font-bold font-mono text-lg animate-pulse">
+                                  +{offlineReport.levelsGained}
+                              </span>
+                          </div>
+                      )}
+                  </div>
+                  
+                  <button 
+                      onClick={() => setOfflineReport(null)}
+                      className="w-full py-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded-xl shadow-lg shadow-yellow-900/50 active:scale-95 transition-transform"
+                  >
+                      收入囊中
+                  </button>
+              </div>
+          </div>
+      )}
 
       {/* LOG HISTORY MODAL */}
       {showLogModal && (
