@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Sword, Shield, Brain, Heart, Zap, Play, Pause, Backpack, TrendingUp, RefreshCcw, User, Gem, Sparkles, Map, ChevronUp, ArrowLeft, Info, Activity, Skull, ShieldCheck, X, Footprints, Crown, Shirt, Hand, Settings, Lock, Trash2, CheckSquare, Square, Axe, Hammer, Wand, Crosshair, Columns, ScrollText } from 'lucide-react';
+import { Sword, Shield, Brain, Heart, Zap, Play, Pause, Backpack, TrendingUp, RefreshCcw, User, Gem, Sparkles, Map, ChevronUp, ArrowLeft, Info, Activity, Skull, ShieldCheck, X, Footprints, Crown, Shirt, Hand, Settings, Lock, Trash2, CheckSquare, Square, Axe, Hammer, Wand, Crosshair, Columns, ScrollText, Save, RotateCcw } from 'lucide-react';
 import { Player, Enemy, GameLog, Item, EquipmentSlot, PlayerStats, ItemRarity } from './types';
 import { EXP_TABLE, MAX_INVENTORY, RARITY_COLORS, LEVEL_CAP, RARITY_BG_COLORS, ENCHANT_CONFIG } from './constants';
 import { calculateDerivedStats, calculateDamage, generateEnemy, generateItem } from './services/gameEngine';
@@ -70,6 +70,24 @@ const ProgressBar = ({ current, max, colorClass, label, height = "h-3", showText
   );
 };
 
+// --- Storage Helper ---
+const STORAGE_KEYS = {
+  PLAYER: 'changhen_player',
+  LEVEL: 'changhen_currentLevel',
+  HIGH_LEVEL: 'changhen_highestLevel',
+  KILL_COUNT: 'changhen_killCount'
+};
+
+const loadState = <T,>(key: string, fallback: T): T => {
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved) return JSON.parse(saved);
+  } catch (e) {
+    console.error(`Failed to load ${key}`, e);
+  }
+  return fallback;
+};
+
 export default function App() {
   // --- State ---
   const [activeTab, setActiveTab] = useState<'role' | 'bag' | 'stage'>('role');
@@ -84,23 +102,36 @@ export default function App() {
   // Item Inspection State (Modal)
   const [viewingItem, setViewingItem] = useState<{ item: Item, source: 'bag' | 'equip' } | null>(null);
 
-  // Progression
-  const [currentLevel, setCurrentLevel] = useState(1);
-  const [highestLevel, setHighestLevel] = useState(1);
-  const [killCount, setKillCount] = useState(0); 
+  // Progression (Persistent)
+  const [currentLevel, setCurrentLevel] = useState(() => loadState(STORAGE_KEYS.LEVEL, 1));
+  const [highestLevel, setHighestLevel] = useState(() => loadState(STORAGE_KEYS.HIGH_LEVEL, 1));
+  const [killCount, setKillCount] = useState(() => loadState(STORAGE_KEYS.KILL_COUNT, 0)); 
   
-  // Player State
-  const [player, setPlayer] = useState<Player>({
-    level: 1,
-    currentExp: 0,
-    maxExp: EXP_TABLE(1),
-    gold: 0,
-    enchantStones: 0,
-    baseStats: { str: 5, dex: 5, int: 5, vit: 5, spi: 5, freePoints: 5 },
-    equipment: {},
-    inventory: [],
-    maxInventorySize: MAX_INVENTORY,
-    autoSellSettings: {} 
+  // Player State (Persistent)
+  const [player, setPlayer] = useState<Player>(() => {
+    const fallback: Player = {
+      level: 1,
+      currentExp: 0,
+      maxExp: EXP_TABLE(1),
+      gold: 0,
+      enchantStones: 0,
+      baseStats: { str: 5, dex: 5, int: 5, vit: 5, spi: 5, freePoints: 5 },
+      equipment: {},
+      inventory: [],
+      maxInventorySize: MAX_INVENTORY,
+      autoSellSettings: {} 
+    };
+    
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.PLAYER);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Merge to ensure new fields are present if loading old save
+        return { ...fallback, ...parsed };
+      }
+    } catch (e) { console.error("Failed to load player", e); }
+    
+    return fallback;
   });
 
   // Combat State
@@ -134,6 +165,24 @@ export default function App() {
   useEffect(() => { invincibleRef.current = invincible; }, [invincible]);
   useEffect(() => { killCountRef.current = killCount; }, [killCount]);
   useEffect(() => { isSearchingRef.current = isSearching; }, [isSearching]);
+
+  // --- Persistence Effect ---
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.PLAYER, JSON.stringify(player));
+    localStorage.setItem(STORAGE_KEYS.LEVEL, JSON.stringify(currentLevel));
+    localStorage.setItem(STORAGE_KEYS.HIGH_LEVEL, JSON.stringify(highestLevel));
+    localStorage.setItem(STORAGE_KEYS.KILL_COUNT, JSON.stringify(killCount));
+  }, [player, currentLevel, highestLevel, killCount]);
+
+  // Init HP on load
+  useEffect(() => {
+     // Initialize HP to max on first load to avoid confusion, or could load from storage if we saved it
+     // For now, let's just sync it to max on mount if we want "fresh" session start feels,
+     // OR strictly, we should probably save it. 
+     // Let's set it to max for now to be nice to the player on reload.
+     const stats = calculateDerivedStats(player);
+     setCurrentHp(stats.maxHp);
+  }, []);
 
   // --- Helpers ---
   const addLog = useCallback((message: string, type: 'combat' | 'loot' | 'system' = 'system') => {
@@ -299,6 +348,13 @@ export default function App() {
       if (soldCount > 0) {
           addLog(`一键出售了 ${soldCount} 件 ${rarity} 装备，获得 ${totalGold} 金币`, 'system');
       }
+  };
+
+  const resetGameData = () => {
+    if (confirm('确定要重置所有游戏存档吗？这将无法恢复。')) {
+        localStorage.clear();
+        window.location.reload();
+    }
   };
 
   // Enchant (Qi Ling) Logic
@@ -628,50 +684,60 @@ export default function App() {
           <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200" onClick={() => setShowBagSettings(false)}>
               <div onClick={e => e.stopPropagation()} className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl">
                   <div className="flex justify-between items-center mb-6">
-                      <h2 className="text-xl font-bold text-white flex items-center gap-2"><Settings size={20}/> 背包设置</h2>
+                      <h2 className="text-xl font-bold text-white flex items-center gap-2"><Settings size={20}/> 游戏设置</h2>
                       <button onClick={() => setShowBagSettings(false)} className="bg-slate-800 p-1 rounded-full hover:bg-slate-700"><X size={18}/></button>
                   </div>
                   
-                  <div className="space-y-2 mb-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
-                      <div className="grid grid-cols-[1.5fr_1fr_1fr] gap-2 mb-2 text-xs text-slate-500 font-bold uppercase tracking-wider px-2">
-                          <div>稀有度</div>
-                          <div className="text-center">自动出售</div>
-                          <div className="text-right">一键清理</div>
-                      </div>
-                      
-                      {Object.values(ItemRarity).map(rarity => (
-                          <div key={rarity} className={`grid grid-cols-[1.5fr_1fr_1fr] gap-2 items-center bg-slate-800/50 p-3 rounded-lg border border-slate-800 ${RARITY_COLORS[rarity].replace('text-', 'border-l-4 border-l-')}`}>
-                              <span className={`font-bold text-sm ${RARITY_COLORS[rarity]}`}>{rarity}</span>
-                              
-                              {/* Auto Sell Toggle */}
-                              <div className="flex justify-center">
-                                  <button 
-                                    onClick={() => toggleAutoSell(rarity)}
-                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${player.autoSellSettings[rarity] ? 'bg-red-500/20 text-red-400 border border-red-500/50' : 'bg-slate-700 text-slate-500 border border-slate-600'}`}
-                                  >
-                                      {player.autoSellSettings[rarity] ? <CheckSquare size={14} /> : <Square size={14} />}
-                                      {player.autoSellSettings[rarity] ? '开启' : '关闭'}
-                                  </button>
-                              </div>
-
-                              {/* Manual Batch Sell */}
-                              <div className="flex justify-end">
-                                  <button 
-                                    onClick={() => batchSell(rarity)}
-                                    className="bg-slate-700 hover:bg-red-900/50 text-slate-300 hover:text-red-200 p-1.5 rounded-lg transition-colors border border-slate-600 hover:border-red-800"
-                                    title={`出售背包中所有非锁定的${rarity}装备`}
-                                  >
-                                      <Trash2 size={16} />
-                                  </button>
-                              </div>
+                  <div className="space-y-4 mb-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                      <div className="space-y-2">
+                          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">自动出售与清理</h3>
+                          <div className="grid grid-cols-[1.5fr_1fr_1fr] gap-2 mb-2 text-xs text-slate-500 font-bold uppercase tracking-wider px-2">
+                              <div>稀有度</div>
+                              <div className="text-center">自动出售</div>
+                              <div className="text-right">一键清理</div>
                           </div>
-                      ))}
+                          
+                          {Object.values(ItemRarity).map(rarity => (
+                              <div key={rarity} className={`grid grid-cols-[1.5fr_1fr_1fr] gap-2 items-center bg-slate-800/50 p-3 rounded-lg border border-slate-800 ${RARITY_COLORS[rarity].replace('text-', 'border-l-4 border-l-')}`}>
+                                  <span className={`font-bold text-sm ${RARITY_COLORS[rarity]}`}>{rarity}</span>
+                                  
+                                  {/* Auto Sell Toggle */}
+                                  <div className="flex justify-center">
+                                      <button 
+                                        onClick={() => toggleAutoSell(rarity)}
+                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${player.autoSellSettings[rarity] ? 'bg-red-500/20 text-red-400 border border-red-500/50' : 'bg-slate-700 text-slate-500 border border-slate-600'}`}
+                                      >
+                                          {player.autoSellSettings[rarity] ? <CheckSquare size={14} /> : <Square size={14} />}
+                                          {player.autoSellSettings[rarity] ? '开启' : '关闭'}
+                                      </button>
+                                  </div>
+
+                                  {/* Manual Batch Sell */}
+                                  <div className="flex justify-end">
+                                      <button 
+                                        onClick={() => batchSell(rarity)}
+                                        className="bg-slate-700 hover:bg-red-900/50 text-slate-300 hover:text-red-200 p-1.5 rounded-lg transition-colors border border-slate-600 hover:border-red-800"
+                                        title={`出售背包中所有非锁定的${rarity}装备`}
+                                      >
+                                          <Trash2 size={16} />
+                                      </button>
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+
+                      <div className="pt-4 border-t border-slate-800">
+                          <button 
+                            onClick={resetGameData}
+                            className="w-full flex items-center justify-center gap-2 bg-red-950/50 hover:bg-red-900 border border-red-900 hover:border-red-700 text-red-500 hover:text-red-300 py-3 rounded-lg font-bold transition-colors"
+                          >
+                             <RotateCcw size={16} /> 重置所有存档
+                          </button>
+                          <p className="text-[10px] text-slate-600 text-center mt-2">
+                             警告: 此操作将删除所有进度且无法恢复。
+                          </p>
+                      </div>
                   </div>
-                  
-                  <p className="text-xs text-slate-500 text-center bg-slate-950 p-3 rounded-lg border border-slate-800">
-                      <Lock size={12} className="inline mr-1 mb-0.5" /> 
-                      已锁定的装备不会被自动出售或一键清理。
-                  </p>
               </div>
           </div>
       )}
