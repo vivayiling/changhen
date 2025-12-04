@@ -97,29 +97,61 @@ export interface DerivedStats {
 
 export type AutoSellSettings = Partial<Record<ItemRarity, boolean>>;
 
-export interface Player {
+// --- NEW PARTY SYSTEM TYPES ---
+
+export interface Hero {
+  id: string;
+  name: string;
+  avatarSeed: string;
   level: number;
-  currentExp: number;
-  maxExp: number;
-  gold: number;
-  enchantStones: number; // Currency for enchanting
   baseStats: PlayerStats;
   equipment: Partial<Record<EquipmentSlot, Item>>;
+  isLeader: boolean;
+}
+
+export interface Player {
+  // Global resources
+  gold: number;
+  enchantStones: number;
+  currentExp: number; // Shared Party EXP? Or Leader EXP? Let's keep it simple: Shared or Leader.
+  maxExp: number;
+  level: number; // Account/Leader Level
+  
+  heroes: Hero[]; // The Party (Max 5)
+  
   inventory: Item[];
   maxInventorySize: number;
   autoSellSettings: AutoSellSettings;
 }
 
 export interface Enemy {
+  id: string; // Unique instance ID
   name: string;
   level: number;
-  currentHp: number;
   maxHp: number;
+  currentHp: number; // Added field
   attack: number;
   armor: number;
   expReward: number;
   goldReward: number;
   isBoss: boolean;
+  avatarSeed: string;
+}
+
+// Runtime Combat Object (Used for both Allies and Enemies)
+export interface CombatUnit {
+  id: string;
+  isAlly: boolean;
+  name: string;
+  level: number;
+  currentHp: number;
+  maxHp: number;
+  stats: DerivedStats; // Snapshot of stats at start of combat
+  isBoss?: boolean;
+  avatarSeed: string;
+  
+  // Visual state
+  animState?: string;
 }
 
 export interface GameLog {

@@ -1,6 +1,7 @@
 
 import { 
   Player, 
+  Hero,
   DerivedStats, 
   Item, 
   ItemRarity, 
@@ -13,8 +14,8 @@ import { BASE_ITEM_NAMES, ADJECTIVES, GAME_SETS, ENCHANT_CONFIG } from '../const
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
 const randomItem = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
-// --- Stats Calculation ---
-export const calculateDerivedStats = (player: Player): DerivedStats => {
+// --- Stats Calculation (Now takes Hero instead of Player) ---
+export const calculateDerivedStats = (hero: Hero): DerivedStats => {
   let stats: DerivedStats = {
     attack: 0,
     armor: 0,
@@ -33,28 +34,28 @@ export const calculateDerivedStats = (player: Player): DerivedStats => {
   };
 
   // 1. Base Stats
-  stats.attack += player.baseStats.str * 3;
-  stats.critDmg += player.baseStats.str * 0.5;
+  stats.attack += hero.baseStats.str * 3;
+  stats.critDmg += hero.baseStats.str * 0.5;
 
-  stats.critRate += player.baseStats.dex * 0.2;
-  stats.dodge += player.baseStats.dex * 0.1;
-  stats.atkSpeed += player.baseStats.dex * 0.05;
+  stats.critRate += hero.baseStats.dex * 0.2;
+  stats.dodge += hero.baseStats.dex * 0.1;
+  stats.atkSpeed += hero.baseStats.dex * 0.05;
 
-  stats.attack += player.baseStats.int * 2;
-  stats.dmgInc += player.baseStats.int * 0.2; 
+  stats.attack += hero.baseStats.int * 2;
+  stats.dmgInc += hero.baseStats.int * 0.2; 
 
-  stats.maxHp += player.baseStats.vit * 20;
-  stats.hpRegen += player.baseStats.vit * 1.0;
-  stats.dmgRed += player.baseStats.vit * 0.05;
+  stats.maxHp += hero.baseStats.vit * 20;
+  stats.hpRegen += hero.baseStats.vit * 1.0;
+  stats.dmgRed += hero.baseStats.vit * 0.05;
 
-  stats.hpRegen += player.baseStats.spi * 1.5;
-  stats.armor += player.baseStats.spi * 1;
-  stats.armorPen += player.baseStats.spi * 0.2;
+  stats.hpRegen += hero.baseStats.spi * 1.5;
+  stats.armor += hero.baseStats.spi * 1;
+  stats.armorPen += hero.baseStats.spi * 0.2;
 
   // 2. Equipment Stats
   const setCounts: Record<string, number> = {};
 
-  Object.values(player.equipment).forEach((item) => {
+  Object.values(hero.equipment).forEach((item) => {
     if (!item) return;
     
     // Calculate Enchant Multiplier
@@ -75,28 +76,17 @@ export const calculateDerivedStats = (player: Player): DerivedStats => {
 
     // Affixes
     item.stats.forEach(stat => {
-        // Percentage stats might not scale with enchant, or scale differently? 
-        // For simplicity, we scale ALL values provided by equipment.
-        // Wait, scaling 10% crit to 60% crit is too much. 
-        // Let's only scale flat values for now? Or scale all but gently?
-        // Requirement: "Qi Ling can enhance equipment attributes".
-        // Let's scale EVERYTHING but be careful with percentages.
-        
         let val = stat.value;
         if (!stat.isPercentage) {
             val = Math.floor(val * enchantMult);
         } else {
-             // For percentage, maybe minimal scaling or no scaling? 
-             // Let's scale it but maybe with diminishing returns or just straight up.
-             // If we have +5% Crit and x6 multiplier = 30% Crit. Acceptable for high level divine gear.
              val = Number((val * enchantMult).toFixed(1));
         }
-        
         applyStat(stats, { ...stat, value: val });
     });
   });
 
-  // 3. Set Bonuses (Set bonuses usually NOT affected by item enchant level)
+  // 3. Set Bonuses
   Object.entries(setCounts).forEach(([setId, count]) => {
     const gameSet = GAME_SETS.find(s => s.id === setId);
     if (gameSet) {
@@ -109,7 +99,7 @@ export const calculateDerivedStats = (player: Player): DerivedStats => {
   });
 
   // Strength/Int Multipliers (Final)
-  stats.attack = Math.floor(stats.attack * (1 + player.baseStats.str / 100));
+  stats.attack = Math.floor(stats.attack * (1 + hero.baseStats.str / 100));
   stats.attack = Math.floor(stats.attack * (1 + stats.dmgInc / 100));
 
   // Caps
@@ -158,7 +148,6 @@ export const calculateDamage = (
   defenderLevel: number,
   defenderDmgRed: number = 0
 ) => {
-  // Armor Penetration reduces effective armor
   const effectiveArmor = Math.max(0, defenderArmor - attackerPen);
   const armorReduction = effectiveArmor / (effectiveArmor + defenderLevel * 15);
   
@@ -169,10 +158,7 @@ export const calculateDamage = (
     rawDamage = rawDamage * (1.5 + (attackerCritDmg / 100));
   }
 
-  // Apply Armor Reduction
   let damage = rawDamage * (1 - armorReduction);
-
-  // Apply Flat Damage Reduction (Percentage)
   damage = damage * (1 - defenderDmgRed / 100);
 
   return { damage: Math.max(1, Math.floor(damage)), isCrit };
@@ -197,9 +183,8 @@ export const generateItem = (level: number): Item => {
   else if (roll < 0.80) { rarity = ItemRarity.MAGIC; affixCount = randomInt(2, 3); maxEnchant = randomInt(1, 3); } 
   else { rarity = ItemRarity.COMMON; affixCount = randomInt(1, 2); maxEnchant = randomInt(0, 2); } 
   
-  // Set Item Logic (Blue+ only)
   const canBeSet = [ItemRarity.UNCOMMON, ItemRarity.EPIC, ItemRarity.IMMORTAL, ItemRarity.LEGENDARY, ItemRarity.DIVINE].includes(rarity);
-  const isSet = canBeSet && Math.random() < 0.3; // 30% chance
+  const isSet = canBeSet && Math.random() < 0.3; 
 
   let setId: string | undefined;
   let setNamePrefix = '';
@@ -210,14 +195,12 @@ export const generateItem = (level: number): Item => {
     setNamePrefix = targetSet.name.split('的')[0] + '的'; 
   }
 
-  // Base Stats
   let baseStat = 0;
   if (slot === EquipmentSlot.WEAPON) baseStat = level * 5 + randomInt(5, 15);
   else if (![EquipmentSlot.NECKLACE, EquipmentSlot.RING1, EquipmentSlot.RING2, EquipmentSlot.AMULET].includes(slot)) {
     baseStat = level * 3 + randomInt(2, 8); 
   }
 
-  // Affix Generation
   const potentialStats = [
     '攻击力', '护甲', '生命值', '暴击率', '暴击伤害', 
     '生命恢复', '吸血', '减防', '攻击速度', '减伤', '增伤'
@@ -276,24 +259,39 @@ export const generateItem = (level: number): Item => {
   };
 };
 
-export const generateEnemy = (level: number, forceBoss: boolean = false): Enemy => {
-  const isBoss = forceBoss;
-  const scale = isBoss ? 5.0 : 1.0; 
+// --- Enemy Generation ---
+export const generateEnemies = (level: number, partySize: number, forceBoss: boolean = false): Enemy[] => {
+  // Determine enemy count: At least 1, max 5.
+  // Generally match party size +/- 1, capped at 5.
+  let enemyCount = Math.max(1, Math.min(5, partySize + randomInt(-1, 1)));
+  if (forceBoss) enemyCount = 1; // Boss usually fights alone or with minimal minions (Let's make Boss alone for now for impact)
+
+  const enemies: Enemy[] = [];
   
   const minionNames = ['暗影爬行者', '深渊骷髅', '虚空行者', '被诅咒的卫兵', '黑暗魔狼', '幽灵射手', '腐烂僵尸', '血色蝙蝠'];
   const bossNames = ['深渊领主', '虚空主宰', '堕落骑士王', '黑暗吞噬者', '鲜血女王', '骸骨巨龙'];
 
-  const baseName = isBoss ? randomItem(bossNames) : randomItem(minionNames);
+  for (let i = 0; i < enemyCount; i++) {
+    const isBoss = forceBoss && i === 0; // Only the first one is Boss if forced
+    const scale = isBoss ? 5.0 : 1.0; 
+    
+    const baseName = isBoss ? randomItem(bossNames) : randomItem(minionNames);
+    
+    // Add letters A, B, C if duplicates names exist (simplified: just random seed handles visuals)
+    enemies.push({
+      id: Math.random().toString(36).substr(2, 9),
+      name: baseName,
+      level: level,
+      maxHp: Math.floor((150 + level * 30) * scale),
+      currentHp: Math.floor((150 + level * 30) * scale),
+      attack: Math.floor((15 + level * 4) * scale),
+      armor: Math.floor(level * 3),
+      expReward: Math.floor((30 + level * 8) * (isBoss ? 10 : 1)), 
+      goldReward: Math.floor((15 + level * 3) * (isBoss ? 10 : 1)), 
+      isBoss,
+      avatarSeed: `${baseName}-${randomInt(1, 9999)}`
+    });
+  }
 
-  return {
-    name: isBoss ? `${baseName}` : `${baseName}`,
-    level: level,
-    maxHp: Math.floor((150 + level * 30) * scale),
-    currentHp: Math.floor((150 + level * 30) * scale),
-    attack: Math.floor((15 + level * 4) * scale),
-    armor: Math.floor(level * 3),
-    expReward: Math.floor((30 + level * 8) * (isBoss ? 10 : 1)), 
-    goldReward: Math.floor((15 + level * 3) * (isBoss ? 10 : 1)), 
-    isBoss
-  };
+  return enemies;
 };
