@@ -52,7 +52,7 @@ export interface GameSet {
 export interface Item {
   id: string;
   name: string;
-  type: EquipmentSlot | 'consumable'; // Added consumable type for Eggs
+  type: EquipmentSlot | 'consumable';
   rarity: ItemRarity;
   level: number;
   stats: ItemStat[];
@@ -62,12 +62,12 @@ export interface Item {
   setId?: string; 
   isLocked?: boolean; 
   
-  // Enchantment (Qi Ling)
+  // Enchantment
   enchantLevel: number;
   maxEnchantSlots: number;
   usedEnchantSlots: number;
   
-  // Consumable Props
+  // Consumable
   consumableType?: 'pet_egg';
 }
 
@@ -91,7 +91,7 @@ export interface DerivedStats {
   speed: number;
   // New Stats
   lifesteal: number; // %
-  armorPen: number; // Flat or %
+  armorPen: number; 
   dmgRed: number; // %
   dmgInc: number; // %
   atkSpeed: number; // % bonus
@@ -106,7 +106,7 @@ export interface PetQualities {
   def: number; // 1000 - 1600
   hp: number;  // 3000 - 6000
   spd: number; // 1000 - 1600
-  grow: number; // 1.0 - 1.3 (Growth Rate)
+  grow: number; // 1.0 - 1.3
 }
 
 export interface PetBreed {
@@ -125,7 +125,9 @@ export interface Pet {
   level: number;
   exp: number;
   qualities: PetQualities;
-  skills: string[]; // Passive skill names
+  baseStats: PlayerStats; // Allocatable points
+  freePoints: number;     // Points to allocate
+  skills: string[];
   avatarSeed: string;
   isLocked?: boolean;
 }
@@ -152,7 +154,7 @@ export interface Player {
   level: number; 
   
   heroes: Hero[]; 
-  pets: Pet[]; // Pet Collection
+  pets: Pet[]; 
   
   inventory: Item[];
   maxInventorySize: number;
@@ -171,10 +173,10 @@ export interface Enemy {
   goldReward: number;
   isBoss: boolean;
   avatarSeed: string;
-  petAvatarSeed?: string; // Visual pet for enemies
+  petAvatarSeed?: string;
 }
 
-// Runtime Combat Object
+// Runtime Combat Object (ATB System)
 export interface CombatUnit {
   id: string;
   isAlly: boolean;
@@ -186,11 +188,19 @@ export interface CombatUnit {
   isBoss?: boolean;
   avatarSeed: string;
   
-  // Pet Visual
-  petAvatarSeed?: string;
+  // ATB System
+  actionGauge: number; // 0 to 100+
+  maxActionGauge: number; // Usually 100
+
+  // Pet Visual (Only for Hero units that have pets attached visually, though pets fight separately now)
+  petAvatarSeed?: string; 
   
   // Visual state
   animState?: string;
+  
+  // Flag to identify if this unit IS a pet
+  isPet?: boolean;
+  ownerId?: string;
 }
 
 export interface GameLog {

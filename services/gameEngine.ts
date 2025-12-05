@@ -1,3 +1,4 @@
+
 import { 
   Player, 
   Hero,
@@ -8,7 +9,8 @@ import {
   ItemStat,
   Enemy,
   Pet,
-  PetBreed
+  PetBreed,
+  PlayerStats
 } from '../types';
 import { BASE_ITEM_NAMES, ADJECTIVES, GAME_SETS, ENCHANT_CONFIG, PET_BREEDS, PET_EGG_ID } from '../constants';
 
@@ -18,12 +20,10 @@ const randomItem = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length
 
 // --- Pet System ---
 export const generatePet = (level: number): Pet => {
-    // 5% chance for Divine Dragon, else random
     let breed: PetBreed;
     if (Math.random() < 0.05) breed = PET_BREEDS.find(b => b.id === 'breed_dragon')!;
     else breed = randomItem(PET_BREEDS.filter(b => b.id !== 'breed_dragon'));
     
-    // Calculate Qualities based on breed ranges
     const qualities = {
         atk: randomInt(breed.minQualities.atk || 1000, breed.maxQualities.atk || 1200),
         def: randomInt(breed.minQualities.def || 1000, breed.maxQualities.def || 1200),
@@ -39,39 +39,58 @@ export const generatePet = (level: number): Pet => {
         level: 1,
         exp: 0,
         qualities,
+        baseStats: { str: 0, dex: 0, int: 0, vit: 0, spi: 0 },
+        freePoints: 10, // Initial free points
         skills: [],
         avatarSeed: `${breed.id}_${randomInt(1, 9999)}`
     };
 };
 
-export const calculatePetBonus = (pet: Pet): Partial<DerivedStats> => {
-    // Simple bonus formula: (Quality / 1000) * Level * Growth
-    const factor = pet.level * pet.qualities.grow;
+// Calculate Pet's ACTUAL Combat Stats (as a CombatUnit)
+export const calculatePetCombatStats = (pet: Pet): DerivedStats => {
+    // Formula: Base + (Quality * Growth * Level * Coefficient) + (Allocated Points * Coefficient)
+    const qFactor = pet.qualities.grow * pet.level;
+
+    // HP: Quality * Growth * Level * 0.01 + Vit * 10
+    const maxHp = Math.floor(pet.qualities.hp * qFactor * 0.01 + pet.baseStats.vit * 10);
+    
+    // Atk: Quality * Growth * Level * 0.002 + Str * 1.5
+    const attack = Math.floor(pet.qualities.atk * qFactor * 0.002 + pet.baseStats.str * 1.5);
+
+    // Def: Quality * Growth * Level * 0.0015 + Vit * 0.5 + Spi * 1
+    const armor = Math.floor(pet.qualities.def * qFactor * 0.0015 + pet.baseStats.vit * 0.5 + pet.baseStats.spi * 1);
+
+    // Speed: Quality * Growth * Level * 0.001 + Dex * 0.1
+    // Base Speed 1.0. Speed Cap around 3-4 for very fast pets.
+    const speed = 1.0 + (pet.qualities.spd * qFactor * 0.00005) + (pet.baseStats.dex * 0.02);
+
+    // Crit: Dex * 0.1
+    const critRate = 5 + pet.baseStats.dex * 0.1;
+
     return {
-        attack: Math.floor((pet.qualities.atk / 1000) * factor * 2),
-        armor: Math.floor((pet.qualities.def / 1000) * factor * 1),
-        maxHp: Math.floor((pet.qualities.hp / 1000) * factor * 10),
-        speed: Math.floor((pet.qualities.spd / 1000) * factor * 0.5),
+        hp: maxHp,
+        maxHp: maxHp,
+        attack: attack,
+        armor: armor,
+        speed: parseFloat(speed.toFixed(2)),
+        critRate: critRate,
+        critDmg: 50 + pet.baseStats.str * 0.2,
+        dodge: pet.baseStats.dex * 0.1,
+        hpRegen: pet.baseStats.vit * 0.5,
+        lifesteal: 0,
+        armorPen: 0,
+        dmgRed: 0,
+        dmgInc: 0,
+        atkSpeed: 0
     };
 };
 
-// --- Stats Calculation ---
+// --- Stats Calculation (Hero) ---
 export const calculateDerivedStats = (hero: Hero, allPets: Pet[] = []): DerivedStats => {
   let stats: DerivedStats = {
-    attack: 0,
-    armor: 0,
-    hp: 100, 
-    maxHp: 100,
-    critRate: 5,
-    critDmg: 0, 
-    dodge: 0,
-    hpRegen: 0,
-    speed: 1,
-    lifesteal: 0,
-    armorPen: 0,
-    dmgRed: 0,
-    dmgInc: 0,
-    atkSpeed: 0,
+    attack: 0, armor: 0, hp: 100, maxHp: 100,
+    critRate: 5, critDmg: 0, dodge: 0, hpRegen: 0, speed: 1,
+    lifesteal: 0, armorPen: 0, dmgRed: 0, dmgInc: 0, atkSpeed: 0,
   };
 
   // 1. Base Stats
@@ -81,6 +100,8 @@ export const calculateDerivedStats = (hero: Hero, allPets: Pet[] = []): DerivedS
   stats.critRate += hero.baseStats.dex * 0.2;
   stats.dodge += hero.baseStats.dex * 0.1;
   stats.atkSpeed += hero.baseStats.dex * 0.05;
+  // Hero Speed: Base 1.0 + Dex factor
+  stats.speed += hero.baseStats.dex * 0.01;
 
   stats.attack += hero.baseStats.int * 2;
   stats.dmgInc += hero.baseStats.int * 0.2; 
@@ -139,21 +160,17 @@ export const calculateDerivedStats = (hero: Hero, allPets: Pet[] = []): DerivedS
     }
   });
 
-  // 4. Pet Bonuses
-  if (hero.activePetId) {
-      const pet = allPets.find(p => p.id === hero.activePetId);
-      if (pet) {
-          const bonus = calculatePetBonus(pet);
-          if (bonus.attack) stats.attack += bonus.attack;
-          if (bonus.armor) stats.armor += bonus.armor;
-          if (bonus.maxHp) stats.maxHp += bonus.maxHp;
-          if (bonus.speed) stats.speed += bonus.speed;
-      }
-  }
+  // 4. Pet Bonuses (Removed - Pets fight separately now!)
+  // If we wanted to keep a small passive bonus from having a pet equipped, we could add it here.
+  // For now, let's assume the benefit is the pet fighting alongside you.
 
   // Strength/Int Multipliers (Final)
   stats.attack = Math.floor(stats.attack * (1 + hero.baseStats.str / 100));
   stats.attack = Math.floor(stats.attack * (1 + stats.dmgInc / 100));
+  
+  // Speed Modifiers from Attack Speed (ATB mechanic)
+  // Higher AtkSpeed = Higher Speed attribute in ATB
+  stats.speed = parseFloat((stats.speed * (1 + stats.atkSpeed / 100)).toFixed(2));
 
   // Caps
   stats.critRate = Math.min(stats.critRate, 80);
@@ -343,7 +360,9 @@ export const generateEnemies = (level: number, partySize: number, forceBoss: boo
     
     const baseName = isBoss ? randomItem(bossNames) : randomItem(minionNames);
     
-    // Pet Logic for Enemies: Bosses always have pets, Minions have 30% chance
+    // Enemy speed scales slightly with level
+    const spd = 1.0 + (level * 0.005);
+
     let petAvatarSeed: string | undefined;
     if (isBoss || Math.random() < 0.3) {
         const breed = randomItem(PET_BREEDS);
